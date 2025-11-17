@@ -287,7 +287,7 @@ class TaskOrchestrator:
                 # Use enhanced Code Agent with structured patches
                 self._add_log(task_id, "Using enhanced Code Agent (line-accurate patches)")
 
-                agent = CodeAgent()
+                agent = CodeAgent(task_id=task_id)
 
                 # Get code context
                 if hasattr(index, 'get_context'):
@@ -332,7 +332,7 @@ class TaskOrchestrator:
                 # Fall back to legacy FixAgent
                 self._add_log(task_id, "Using legacy FixAgent")
 
-                fix_agent = FixAgent()
+                fix_agent = FixAgent(task_id=task_id)
 
                 # Generate patches
                 self._add_log(task_id, "Calling LLM to generate fix...")

@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # Jaeger - Distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: asa-jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - asa-observability
+
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: asa-prometheus
+    ports:
+      - "9090:9090"    # Prometheus UI
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - asa-observability
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: asa-grafana
+    ports:
+      - "3000:3000"    # Grafana UI
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - asa-observability
+
+  # PostgreSQL - For storing metrics (optional)
+  postgres-metrics:
+    image: postgres:15
+    container_name: asa-postgres-metrics
+    environment:
+      - POSTGRES_DB=asa_metrics
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-metrics-data:/var/lib/postgresql/data
+    networks:
+      - asa-observability
+
+networks:
+  asa-observability:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  postgres-metrics-data:

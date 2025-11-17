@@ -16,6 +16,12 @@ from openai import OpenAI
 from app.services.patch_schema import CodePatch, PatchSet, PatchType
 from app.services.patch_applicator import PatchApplicator
 
+try:
+    from app.services.llm_client import LLMClient
+    HAS_LLM_CLIENT = True
+except ImportError:
+    HAS_LLM_CLIENT = False
+
 
 class CodeAgent:
     """
@@ -28,18 +34,29 @@ class CodeAgent:
     - Semantic code index
     """
 
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: str = None, task_id: Optional[str] = None, user_id: Optional[str] = None):
         """
         Initialize Code Agent.
 
         Args:
             api_key: OpenAI API key. If None, loads from OPENAI_API_KEY env var.
+            task_id: Optional task ID for usage tracking
+            user_id: Optional user ID for usage tracking
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key not provided. Set OPENAI_API_KEY environment variable.")
 
-        self.client = OpenAI(api_key=self.api_key)
+        self.task_id = task_id
+        self.user_id = user_id
+
+        # Use LLMClient wrapper if available for tracking, otherwise fallback to direct client
+        if HAS_LLM_CLIENT:
+            self.llm_client = LLMClient(api_key=self.api_key, task_id=task_id, user_id=user_id)
+            self.client = None
+        else:
+            self.client = OpenAI(api_key=self.api_key)
+            self.llm_client = None
 
     def generate_fix(
         self,
@@ -68,23 +85,35 @@ class CodeAgent:
             additional_context=additional_context
         )
 
-        # Call LLM
+        # Call LLM (with tracking if available)
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": self._get_system_prompt()
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.2,
-                max_tokens=3000
-            )
+            messages = [
+                {
+                    "role": "system",
+                    "content": self._get_system_prompt()
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+
+            if self.llm_client:
+                # Use tracked client
+                response = self.llm_client.chat_completion(
+                    messages=messages,
+                    model="gpt-4",
+                    temperature=0.2,
+                    max_tokens=3000
+                )
+            else:
+                # Fallback to direct client
+                response = self.client.chat.completions.create(
+                    model="gpt-4",
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=3000
+                )
 
             # Parse response
             patch_json = response.choices[0].message.content.strip()
