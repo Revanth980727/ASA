@@ -1,0 +1,132 @@
+# ASA Sandbox - Hardened Docker image for isolated task execution
+# Includes: Python 3.11, Node.js 20, Playwright, Git, and security hardening
+#
+# Usage:
+#   docker build -f docker/Dockerfile.sandbox -t asa-sandbox:latest .
+#   docker run --rm --network none -v /workspace:/workspace asa-sandbox:latest
+
+FROM ubuntu:22.04
+
+# Metadata
+LABEL maintainer="ASA Team"
+LABEL description="Hardened sandbox environment for ASA task execution"
+LABEL version="1.0"
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV NODE_ENV=production
+
+# Create non-root user for running tasks
+RUN groupadd -r asa --gid=1000 && \
+    useradd -r -g asa --uid=1000 --home-dir=/home/asa --shell=/bin/bash asa && \
+    mkdir -p /home/asa && \
+    chown -R asa:asa /home/asa
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python dependencies
+    python3.11 \
+    python3.11-dev \
+    python3.11-venv \
+    python3-pip \
+    # Node.js dependencies
+    curl \
+    ca-certificates \
+    gnupg \
+    # Git
+    git \
+    # Build tools (minimal)
+    build-essential \
+    # Playwright dependencies
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
+    libxshmfence1 \
+    # Cleanup
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20.x
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+# Upgrade pip
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install common Python packages
+RUN pip3 install --no-cache-dir \
+    pytest==7.4.3 \
+    pytest-cov==4.1.0 \
+    pytest-timeout==2.2.0 \
+    requests==2.31.0 \
+    gitpython==3.1.40
+
+# Install Playwright
+RUN npm install -g playwright@1.40.0 && \
+    npx playwright install --with-deps chromium && \
+    rm -rf /root/.cache
+
+# Set resource limits in ulimit format (will be enforced at runtime)
+# These are defaults, can be overridden when running container
+ENV ASA_MAX_MEMORY="512m"
+ENV ASA_CPU_QUOTA="50000"
+ENV ASA_TIMEOUT_SECONDS="300"
+ENV ASA_MAX_FILE_SIZE="100m"
+
+# Create workspace directory
+RUN mkdir -p /workspace && \
+    chown -R asa:asa /workspace
+
+# Create output directory for logs
+RUN mkdir -p /output && \
+    chown -R asa:asa /output
+
+# Security hardening
+# 1. Remove setuid/setgid bits from executables
+RUN find / -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true
+
+# 2. Remove unnecessary packages
+RUN apt-get remove -y curl gnupg && \
+    apt-get autoremove -y && \
+    apt-get clean
+
+# 3. Disable unnecessary services
+RUN rm -rf /var/cache/apt/* /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# 4. Set strict file permissions
+RUN chmod -R 755 /home/asa && \
+    chmod -R 755 /workspace && \
+    chmod -R 755 /output
+
+# Switch to non-root user
+USER asa
+WORKDIR /workspace
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD python3 --version || exit 1
+
+# Default command (can be overridden)
+CMD ["/bin/bash"]
+
+# Security labels
+LABEL security.apparmor="unconfined"
+LABEL security.seccomp="default"

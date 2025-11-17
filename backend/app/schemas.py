@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 class TaskSubmit(BaseModel):
     repo_url: str = Field(..., min_length=1, description="Git repository URL")
@@ -44,11 +44,18 @@ class TaskDetail(BaseModel):
 
 class TaskListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-    
+
     task_id: str = Field(alias="id")
     repo_url: str
     status: str
     pr_url: Optional[str]
     created_at: datetime
     updated_at: datetime
+
+class FeedbackSubmit(BaseModel):
+    """User feedback for RLHF (Reinforcement Learning from Human Feedback)"""
+    rating: int = Field(..., ge=1, le=5, description="Rating from 1-5")
+    approved: bool = Field(..., description="Whether the fix is approved")
+    comment: Optional[str] = Field(None, description="Optional feedback comment")
+    issues: Optional[List[str]] = Field(default_factory=list, description="List of issues found")
 

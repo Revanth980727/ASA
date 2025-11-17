@@ -1,0 +1,78 @@
+# Docker Compose configuration for ASA sandbox environments
+#
+# Usage:
+#   docker-compose -f docker/docker-compose.sandbox.yml up
+#   docker-compose -f docker/docker-compose.sandbox.yml down
+
+version: '3.8'
+
+services:
+  asa-sandbox:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sandbox
+    image: asa-sandbox:latest
+    container_name: asa-sandbox-${TASK_ID:-default}
+
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:default
+
+    # Read-only root filesystem (workspace is writable)
+    read_only: true
+
+    # Resource limits
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpu_quota: 50000  # 50% of one CPU
+    pids_limit: 100
+
+    # Network isolation (disable by default)
+    network_mode: none
+
+    # Volumes
+    volumes:
+      - ${WORKSPACE_PATH:-./workspace}:/workspace
+      - ${OUTPUT_PATH:-./output}:/output
+      - /tmp  # Temporary writable directory
+
+    # Environment variables
+    environment:
+      - TASK_ID=${TASK_ID:-unknown}
+      - ASA_TIMEOUT=${ASA_TIMEOUT:-300}
+      - PYTHONUNBUFFERED=1
+
+    # Prevent privilege escalation
+    privileged: false
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+
+    # User
+    user: "1000:1000"
+
+    # Restart policy
+    restart: "no"
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Labels
+    labels:
+      com.asa.type: "sandbox"
+      com.asa.task_id: "${TASK_ID:-unknown}"
+      com.asa.auto_cleanup: "true"
+
+networks:
+  default:
+    driver: none

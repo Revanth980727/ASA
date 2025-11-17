@@ -1,5 +1,6 @@
 import time
 import sys
+import os
 from pathlib import Path
 
 from datetime import datetime
@@ -135,16 +136,75 @@ class TaskOrchestrator:
             return
         else:
             try:
-                from app.services.code_index import CodeIndex
-                
-                index = CodeIndex(task.workspace_path)
-                index.build_index()
-                self._add_log(task_id, f"Indexed {len(index.file_contents)} Python files")
+                # Use SemanticCodeIndex for better context (falls back to CodeIndex if unavailable)
+                try:
+                    from app.services.semantic_index import SemanticCodeIndex
+
+                    index = SemanticCodeIndex(task.workspace_path)
+                    index.build_index()
+                    stats = index.get_stats()
+                    self._add_log(task_id, f"Semantic index built: {stats['total_nodes']} nodes "
+                                          f"({stats['functions']} functions, {stats['classes']} classes, "
+                                          f"{stats['methods']} methods)")
+                except ImportError as e:
+                    # Fall back to simple CodeIndex
+                    self._add_log(task_id, "Semantic indexing not available, using simple index")
+                    from app.services.code_index import CodeIndex
+
+                    index = CodeIndex(task.workspace_path)
+                    index.build_index()
+                    self._add_log(task_id, f"Indexed {len(index.file_contents)} Python files")
             except Exception as e:
                 error_msg = f"Failed to index code: {str(e)}"
                 self._add_log(task_id, error_msg)
                 self._set_status(task_id, "FAILED")
                 return
+
+        # Step 2.5 - VERIFYING_BUG_BEHAVIOR (optional CIT Agent step)
+        enable_cit = os.getenv("ENABLE_CIT_AGENT", "false").lower() == "true"
+
+        if enable_cit:
+            if not self._set_status(task_id, "VERIFYING_BUG_BEHAVIOR"):
+                return
+
+            task = self.db.query(Task).filter(Task.id == task_id).first()
+            if not task or not task.workspace_path:
+                self._add_log(task_id, "No workspace_path, skipping behavioral verification")
+            else:
+                try:
+                    from app.services.cit_agent import CITAgent
+
+                    self._add_log(task_id, "Generating E2E test to verify bug behavior...")
+
+                    cit_agent = CITAgent(use_docker=True)
+
+                    # Verify bug exists using behavioral test
+                    bug_exists, test_result, test_file = cit_agent.verify_bug(
+                        bug_description=task.bug_description,
+                        workspace_path=task.workspace_path,
+                        app_context=""  # Could be enhanced with repo context
+                    )
+
+                    # Log results
+                    self._add_log(task_id, f"Behavioral test result: {test_result.get_summary()}")
+
+                    if bug_exists:
+                        self._add_log(task_id, "✓ Bug confirmed by behavioral test (test failed as expected)")
+                        self._add_log(task_id, f"Test file: {test_file}")
+
+                        # Store test file path for later verification
+                        task.e2e_test_path = test_file
+                        self.db.add(task)
+                        self.db.commit()
+                    else:
+                        self._add_log(task_id, "⚠ Behavioral test passed - bug may not be reproducible via E2E test")
+                        self._add_log(task_id, "Continuing with unit test verification...")
+
+                except Exception as e:
+                    # Don't fail the whole pipeline if CIT fails
+                    error_msg = f"CIT Agent error (non-fatal): {str(e)}"
+                    self._add_log(task_id, error_msg)
+                    self._add_log(task_id, "Continuing with unit test verification...")
 
         # Step 3 - RUNNING_TESTS_BEFORE_FIX
         if not self._set_status(task_id, "RUNNING_TESTS_BEFORE_FIX"):
@@ -199,29 +259,94 @@ class TaskOrchestrator:
             return
 
         try:
-            from app.services.fix_agent import FixAgent, apply_patches
-            from app.services.code_index import CodeIndex
+            # Try enhanced CodeAgent first, fall back to legacy FixAgent
+            use_enhanced = True
+            try:
+                from app.services.code_agent import CodeAgent
+                from app.services.patch_applicator import PatchApplicator
+            except ImportError:
+                use_enhanced = False
+                from app.services.fix_agent import FixAgent, apply_patches
 
-            # Rebuild code index
-            index = CodeIndex(task.workspace_path)
-            index.build_index()
+            # Rebuild code index with semantic search
+            try:
+                from app.services.semantic_index import SemanticCodeIndex
 
-            # Initialize FixAgent
-            fix_agent = FixAgent()
+                index = SemanticCodeIndex(task.workspace_path)
+                index.build_index()
+                self._add_log(task_id, "Using semantic search for context")
+            except ImportError:
+                # Fall back to simple CodeIndex
+                from app.services.code_index import CodeIndex
 
-            # Generate patches
-            self._add_log(task_id, "Calling LLM to generate fix...")
-            patches = fix_agent.generate_patch(
-                task=task,
-                failing_output=task.test_output_before or "",
-                code_index=index
-            )
+                index = CodeIndex(task.workspace_path)
+                index.build_index()
+                self._add_log(task_id, "Using simple search for context")
 
-            self._add_log(task_id, f"Generated {len(patches)} patch(es)")
+            if use_enhanced:
+                # Use enhanced Code Agent with structured patches
+                self._add_log(task_id, "Using enhanced Code Agent (line-accurate patches)")
 
-            # Apply patches
-            apply_patches(patches, workspace_path=task.workspace_path)
-            self._add_log(task_id, "Applied patches to source files")
+                agent = CodeAgent()
+
+                # Get code context
+                if hasattr(index, 'get_context'):
+                    code_context = index.get_context(task.bug_description, max_results=5)
+                else:
+                    snippets = index.search(task.bug_description, max_results=5)
+                    context_parts = []
+                    for i, snippet in enumerate(snippets, 1):
+                        context_parts.append(
+                            f"### File {i}: {snippet.file_path} (lines {snippet.start_line}-{snippet.end_line})\n"
+                            f"```python\n{snippet.snippet}\n```"
+                        )
+                    code_context = "\n\n".join(context_parts)
+
+                # Generate patches
+                self._add_log(task_id, "Generating structured patches...")
+                patch_set = agent.generate_fix(
+                    bug_description=task.bug_description,
+                    test_failure_log=task.test_output_before or "",
+                    code_context=code_context
+                )
+
+                self._add_log(task_id,
+                             f"Generated {len(patch_set.patches)} patch(es) "
+                             f"(confidence: {patch_set.confidence:.2f})")
+                self._add_log(task_id, f"Rationale: {patch_set.rationale}")
+
+                # Apply patches
+                applicator = PatchApplicator(task.workspace_path, create_backups=True)
+                results = applicator.apply_patch_set(patch_set, dry_run=False, fail_fast=False)
+
+                if results["success"]:
+                    self._add_log(task_id,
+                                 f"Applied {results['applied']} patch(es) successfully")
+                else:
+                    self._add_log(task_id,
+                                 f"Patch application completed with {results['failed']} error(s)")
+                    for error in results["errors"]:
+                        self._add_log(task_id, f"  - {error}")
+
+            else:
+                # Fall back to legacy FixAgent
+                self._add_log(task_id, "Using legacy FixAgent")
+
+                fix_agent = FixAgent()
+
+                # Generate patches
+                self._add_log(task_id, "Calling LLM to generate fix...")
+                patches = fix_agent.generate_patch(
+                    task=task,
+                    failing_output=task.test_output_before or "",
+                    code_index=index
+                )
+
+                self._add_log(task_id, f"Generated {len(patches)} patch(es)")
+
+                # Apply patches
+                apply_patches(patches, workspace_path=task.workspace_path)
+                self._add_log(task_id, "Applied patches to source files")
 
         except Exception as e:
             error_msg = f"Failed to generate or apply fix: {str(e)}"
@@ -253,7 +378,7 @@ class TaskOrchestrator:
             if tests_passed:
                 # Success! Fix worked
                 self._add_log(task_id, f"Tests passed after fix! Output:\n{truncated_output}")
-                # Continue to PR creation
+                # Continue to behavioral verification if enabled
             else:
                 # Fix didn't work
                 self._add_log(task_id, f"Tests still failing after fix. Output:\n{truncated_output}")
@@ -265,6 +390,43 @@ class TaskOrchestrator:
             self._add_log(task_id, error_msg)
             self._set_status(task_id, "FAILED")
             return
+
+        # Step 5.5 - VERIFYING_FIX_BEHAVIOR (optional CIT Agent verification)
+        enable_cit = os.getenv("ENABLE_CIT_AGENT", "false").lower() == "true"
+
+        if enable_cit:
+            task = self.db.query(Task).filter(Task.id == task_id).first()
+
+            # Check if we have a behavioral test to re-run
+            if task and hasattr(task, 'e2e_test_path') and task.e2e_test_path:
+                if not self._set_status(task_id, "VERIFYING_FIX_BEHAVIOR"):
+                    return
+
+                try:
+                    from app.services.cit_agent import CITAgent
+
+                    self._add_log(task_id, "Re-running E2E test to verify fix...")
+
+                    cit_agent = CITAgent(use_docker=True)
+
+                    # Verify fix works
+                    fix_works, test_result = cit_agent.verify_fix(
+                        test_file_path=task.e2e_test_path,
+                        workspace_path=task.workspace_path
+                    )
+
+                    self._add_log(task_id, f"Behavioral verification: {test_result.get_summary()}")
+
+                    if fix_works:
+                        self._add_log(task_id, "✓ Fix confirmed by behavioral test (E2E test now passes)")
+                    else:
+                        self._add_log(task_id, "⚠ E2E test still failing, but unit tests pass")
+                        self._add_log(task_id, test_result.get_failure_details())
+                        # Don't fail - unit tests passed, E2E might need different fix
+
+                except Exception as e:
+                    error_msg = f"CIT verification error (non-fatal): {str(e)}"
+                    self._add_log(task_id, error_msg)
 
         # Step 6 - CREATING_PR_BRANCH
         if not self._set_status(task_id, "CREATING_PR_BRANCH"):

@@ -13,6 +13,11 @@ from pathlib import Path
 from openai import OpenAI
 
 from app.services.code_index import CodeIndex, CodeSnippet
+try:
+    from app.services.semantic_index import SemanticCodeIndex, SearchResult
+except ImportError:
+    SemanticCodeIndex = None
+    SearchResult = None
 
 
 class FixAgent:
@@ -31,14 +36,14 @@ class FixAgent:
 
         self.client = OpenAI(api_key=self.api_key)
 
-    def generate_patch(self, task, failing_output: str, code_index: CodeIndex) -> List[Dict[str, str]]:
+    def generate_patch(self, task, failing_output: str, code_index) -> List[Dict[str, str]]:
         """
         Generate a structured patch to fix the failing tests.
 
         Args:
             task: Task object with bug_description attribute
             failing_output: Output from the failing test run
-            code_index: CodeIndex instance for searching relevant code
+            code_index: CodeIndex or SemanticCodeIndex instance for searching relevant code
 
         Returns:
             List of patch dictionaries with format:
@@ -50,11 +55,14 @@ class FixAgent:
                 }
             ]
         """
-        # Search for relevant code snippets
-        snippets = code_index.search(task.bug_description, max_results=5)
-
-        # Build context from snippets
-        context = self._build_context(snippets)
+        # Get context using semantic or simple search
+        if hasattr(code_index, 'get_context'):
+            # SemanticCodeIndex has a get_context method
+            context = code_index.get_context(task.bug_description, max_results=5)
+        else:
+            # Legacy CodeIndex - search and build context manually
+            snippets = code_index.search(task.bug_description, max_results=5)
+            context = self._build_context(snippets)
 
         # Create prompt for LLM
         prompt = self._create_fix_prompt(

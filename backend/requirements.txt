@@ -4,3 +4,23 @@ sqlalchemy==2.0.23
 pydantic==2.5.0
 openai==1.12.0
 
+# Codebase Guardian / SCM layer dependencies
+tree-sitter==0.21.0
+tree-sitter-python==0.21.0
+sentence-transformers==2.2.2
+chromadb==0.4.22
+torch==2.1.2
+
+# Git integration dependencies
+GitPython==3.1.40
+PyGithub==2.1.1
+
+# Container/Docker dependencies
+docker==7.0.0
+
+# Real-time updates and WebSocket dependencies
+websockets==12.0
+
+# CIT Agent / E2E testing dependencies
+playwright==1.40.0
+

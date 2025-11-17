@@ -16,6 +16,7 @@ class Task(Base):
     pr_url = Column(String, nullable=True)
     logs = Column(Text, nullable=True)
     test_output_before = Column(Text, nullable=True)
+    e2e_test_path = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
