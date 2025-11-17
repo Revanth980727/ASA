@@ -1,36 +1,31 @@
-"""
-Repo Manager - Git operations for the bug-fixing workflow.
+import os
+import subprocess
+from pathlib import Path
 
-Handles:
-- Cloning repos to workspace
-- Creating fix branches
-- Applying patches
-- Committing and pushing changes
-- Opening pull requests
-"""
+def create_workspace(task_id: str, base_dir: str = "workspaces") -> str:
+    """
+    Creates the base directory if needed and a subdirectory for the task.
+    Returns the absolute path to the task's workspace directory.
+    """
+    path = Path(base_dir) / task_id
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path.absolute())
 
-class RepoManager:
-    """Manages Git operations for a single repository."""
-
-    def __init__(self, workspace_path: str):
-        self.workspace_path = workspace_path
-
-    async def clone_repo(self, repo_url: str) -> str:
-        """Clone repository to workspace."""
-        # TODO: Implement git clone
-        pass
-
-    async def create_branch(self, branch_name: str):
-        """Create and checkout a new branch."""
-        # TODO: Implement branch creation
-        pass
-
-    async def commit_and_push(self, commit_message: str):
-        """Commit changes and push to remote."""
-        # TODO: Implement commit and push
-        pass
-
-    async def create_pull_request(self, title: str, body: str) -> str:
-        """Create a pull request and return the PR URL."""
-        # TODO: Implement PR creation via GitHub API or gh CLI
-        pass
+def clone_repo(repo_url: str, workspace_path: str, branch: str = "main") -> None:
+    """
+    Clones the repository into the specified workspace path.
+    Uses subprocess for git operations with basic error handling.
+    Logs simple messages.
+    """
+    print(f"Cloning started for {repo_url} into {workspace_path}")
+    try:
+        result = subprocess.run(
+            ['git', 'clone', '-b', branch, repo_url, workspace_path],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        print("Cloning finished")
+    except subprocess.CalledProcessError as e:
+        print(f"Cloning failed: {e.stderr}")
+        raise Exception(f"Failed to clone repo: {e.stderr}")

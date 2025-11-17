@@ -1,37 +1,55 @@
-"""
-Code Index - AST parsing and vector embeddings for code search.
+from dataclasses import dataclass
+from pathlib import Path
+import os
 
-Implements a minimal Structured Context Model (SCM):
-- Parse code into AST using tree-sitter
-- Extract top-level symbols (functions, classes)
-- Generate embeddings for code chunks
-- Store in vector database (ChromaDB)
-- Provide semantic code search
-"""
-
-from typing import List, Dict, Any
-
+@dataclass
 class CodeSnippet:
-    """Represents a relevant code snippet."""
-
-    def __init__(self, file_path: str, line_start: int, line_end: int, content: str):
-        self.file_path = file_path
-        self.line_start = line_start
-        self.line_end = line_end
-        self.content = content
+    file_path: str
+    start_line: int
+    end_line: int
+    snippet: str
 
 class CodeIndex:
-    """Indexes and searches code using AST and embeddings."""
+    def __init__(self, workspace_path: str):
+        self.workspace_path = Path(workspace_path)
+        self.file_contents: dict[str, str] = {}  # file_path -> content
 
-    def __init__(self, repo_path: str):
-        self.repo_path = repo_path
+    def build_index(self) -> None:
+        """Walk the workspace and read Python files, storing content in memory."""
+        skip_dirs = {'.git', 'venv', 'node_modules', 'dist', 'build'}
 
-    async def build_index(self):
-        """Build AST and embeddings index for the repository."""
-        # TODO: Implement AST parsing and embedding generation
-        pass
+        for py_file in self.workspace_path.rglob('*.py'):
+            # Check if any part of the path is in skip_dirs
+            if any(part in skip_dirs for part in py_file.parts):
+                continue
 
-    async def search_relevant_code(self, query: str) -> List[CodeSnippet]:
-        """Search for code relevant to the query."""
-        # TODO: Implement semantic search using embeddings
-        pass
+            try:
+                with open(py_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                self.file_contents[str(py_file)] = content
+            except Exception as e:
+                print(f"Error reading {py_file}: {e}")
+
+    def search(self, bug_description: str, max_results: int = 10) -> list[CodeSnippet]:
+        """Simple search: split bug_description into words, find files containing any word."""
+        words = bug_description.lower().split()
+        matching_snippets = []
+
+        for file_path, content in self.file_contents.items():
+            content_lower = content.lower()
+            if any(word in content_lower for word in words):
+                # Get first 40 lines as snippet
+                lines = content.split('\n')[:40]
+                snippet = '\n'.join(lines)
+                code_snippet = CodeSnippet(
+                    file_path=file_path,
+                    start_line=1,
+                    end_line=min(40, len(lines)),
+                    snippet=snippet
+                )
+                matching_snippets.append(code_snippet)
+
+                if len(matching_snippets) >= max_results:
+                    break
+
+        return matching_snippets

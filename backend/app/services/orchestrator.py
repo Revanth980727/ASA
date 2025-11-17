@@ -1,4 +1,6 @@
 import time
+import sys
+from pathlib import Path
 
 from datetime import datetime
 
@@ -9,6 +11,14 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 
 from app.models import Task
+
+# Add project root to path to import from src/core
+# File is at: backend/app/services/orchestrator.py
+# Need to go up 3 levels to reach project root (ASA/)
+_orchestrator_file = Path(__file__).resolve()
+project_root = _orchestrator_file.parent.parent.parent.parent
+if project_root.exists() and (project_root / "src" / "core" / "repo_manager.py").exists():
+    sys.path.insert(0, str(project_root))
 
 class TaskOrchestrator:
 
@@ -58,9 +68,9 @@ class TaskOrchestrator:
 
         """
 
-        Fake pipeline:
+        Pipeline:
 
-        - CLONING_REPO
+        - CLONING_REPO (creates workspace, clones repo)
 
         - INDEXING_CODE
 
@@ -76,14 +86,41 @@ class TaskOrchestrator:
 
             return
 
-        time.sleep(2)  # simulate work
-
-        # Step 2 - INDEXING_CODE
-
-        if not self._set_status(task_id, "INDEXING_CODE"):
-
+        # Load task to get repo_url
+        task = self.db.query(Task).filter(Task.id == task_id).first()
+        if not task:
             return
 
+        try:
+            # Import here to avoid circular imports
+            from src.core.repo_manager import create_workspace, clone_repo
+
+            # Create workspace for this task
+            workspace_path = create_workspace(task_id)
+            
+            # Store workspace_path on Task
+            task.workspace_path = workspace_path
+            self.db.add(task)
+            self.db.commit()
+            
+            # Clone the repo into the workspace
+            clone_repo(task.repo_url, workspace_path)
+            
+            # Log success
+            self._add_log(task_id, f"Successfully cloned {task.repo_url} to {workspace_path}")
+            
+            # Move to INDEXING_CODE on success
+            if not self._set_status(task_id, "INDEXING_CODE"):
+                return
+
+        except Exception as e:
+            # Log error and move to FAILED
+            error_msg = f"Failed to clone repository: {str(e)}"
+            self._add_log(task_id, error_msg)
+            self._set_status(task_id, "FAILED")
+            return
+
+        # Step 2 - INDEXING_CODE (simulated for now)
         time.sleep(2)  # simulate work
 
         # Step 3 - COMPLETED
@@ -150,16 +187,31 @@ class TaskOrchestrator:
 
         self.db.refresh(task)
 
-        # TODO: later, add real actions for each state:
-
-        # if new_status == "CLONING_REPO":
-
-        #     repo_manager.clone_repo(task)
-
-        # elif new_status == "INDEXING_CODE":
-
-        #     code_index.build_index(task)
-
-        # etc.
-
         return True
+
+    def _add_log(self, task_id: str, message: str) -> None:
+        """
+        Add a log message to the task's logs field.
+        """
+        task: Optional[Task] = (
+            self.db.query(Task)
+            .filter(Task.id == task_id)
+            .first()
+        )
+        
+        if task is None:
+            return
+
+        timestamp = datetime.utcnow().isoformat()
+        log_line = f"[{timestamp}] {message}"
+
+        existing_logs = task.logs or ""
+        if existing_logs:
+            task.logs = existing_logs + "\n" + log_line
+        else:
+            task.logs = log_line
+
+        task.updated_at = datetime.utcnow()
+        self.db.add(task)
+        self.db.commit()
+        self.db.refresh(task)
