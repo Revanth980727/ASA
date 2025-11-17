@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from datetime import datetime
 from typing import Optional
 
@@ -28,7 +28,9 @@ class TaskResponse(BaseModel):
     status: str
 
 class TaskDetail(BaseModel):
-    task_id: str
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    
+    task_id: str = Field(alias="id")
     repo_url: str
     bug_description: str
     test_command: Optional[str]
@@ -40,17 +42,13 @@ class TaskDetail(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
 class TaskListItem(BaseModel):
-    task_id: str
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    
+    task_id: str = Field(alias="id")
     repo_url: str
     status: str
     pr_url: Optional[str]
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
