@@ -13,8 +13,8 @@ from tree_sitter import Language, Parser
 
 @dataclass
 class CodeNode:
-    """Represents a parsed code node (function, class, method, etc.)"""
-    type: str  # 'function', 'class', 'method'
+    """Represents a parsed code node (function, class, method, import, etc.)"""
+    type: str  # 'function', 'class', 'method', 'import', 'module_level'
     name: str
     file_path: str
     start_line: int
@@ -30,7 +30,8 @@ class ASTParser:
     def __init__(self):
         """Initialize the tree-sitter parser for Python."""
         self.parser = Parser()
-        self.parser.set_language(Language(tspython.language()))
+        # tree-sitter 0.21+ requires a name parameter
+        self.parser.set_language(Language(tspython.language(), "python"))
 
     def parse_file(self, file_path: str) -> List[CodeNode]:
         """
@@ -89,6 +90,18 @@ class ASTParser:
                             method_node = self._extract_function(stmt, source_code, file_path, is_method=True)
                             if method_node:
                                 nodes.append(method_node)
+
+        # Extract import statements (critical for import-related bugs!)
+        elif node.type in ('import_statement', 'import_from_statement'):
+            code_node = self._extract_import(node, source_code, file_path)
+            if code_node:
+                nodes.append(code_node)
+
+        # Extract module-level code (expressions, assignments, etc.)
+        elif node.type == 'expression_statement' and node.parent and node.parent.type == 'module':
+            code_node = self._extract_module_level_code(node, source_code, file_path)
+            if code_node:
+                nodes.append(code_node)
 
         # Recursively process children
         for child in node.children:
@@ -188,6 +201,71 @@ class ASTParser:
                             return docstring.strip()
             return None
         except Exception:
+            return None
+
+    def _extract_import(self, node, source_code: str, file_path: str) -> Optional[CodeNode]:
+        """Extract import statement details."""
+        try:
+            # Get line numbers
+            start_line = node.start_point[0] + 1
+            end_line = node.end_point[0] + 1
+
+            # Get full import statement
+            code = source_code[node.start_byte:node.end_byte]
+
+            # Extract a name for the import
+            # For "import foo" -> name is "foo"
+            # For "from foo import bar" -> name is "foo.bar"
+            # For "import foo as bar" -> name is "foo (as bar)"
+            name = code.strip()
+            if len(name) > 50:
+                name = name[:47] + "..."
+
+            return CodeNode(
+                type='import',
+                name=name,
+                file_path=file_path,
+                start_line=start_line,
+                end_line=end_line,
+                code=code,
+                docstring=None,
+                signature=code.strip()
+            )
+        except Exception as e:
+            print(f"Error extracting import: {e}")
+            return None
+
+    def _extract_module_level_code(self, node, source_code: str, file_path: str) -> Optional[CodeNode]:
+        """Extract module-level code (expressions, assignments at module scope)."""
+        try:
+            # Get line numbers
+            start_line = node.start_point[0] + 1
+            end_line = node.end_point[0] + 1
+
+            # Get code
+            code = source_code[node.start_byte:node.end_byte]
+
+            # Skip if it's just whitespace or comments
+            if not code.strip() or code.strip().startswith('#'):
+                return None
+
+            # Create a short name from the code
+            name = code.strip()
+            if len(name) > 50:
+                name = name[:47] + "..."
+
+            return CodeNode(
+                type='module_level',
+                name=name,
+                file_path=file_path,
+                start_line=start_line,
+                end_line=end_line,
+                code=code,
+                docstring=None,
+                signature=None
+            )
+        except Exception as e:
+            print(f"Error extracting module-level code: {e}")
             return None
 
     def parse_workspace(self, workspace_path: str) -> List[CodeNode]:

@@ -1,6 +1,12 @@
 """
 LLM Client Wrapper with Token Usage and Cost Tracking.
 
+⚠️ DEPRECATED: This module is deprecated in favor of llm_gateway.py
+⚠️ Use app.services.llm_gateway.LLMGateway instead for:
+   - Model pinning per purpose
+   - Budget enforcement
+   - Centralized LLM configuration
+
 Provides:
 - Automatic token usage logging
 - Cost calculation based on model pricing
@@ -11,6 +17,7 @@ Provides:
 
 import os
 import time
+import warnings
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from openai import OpenAI
@@ -68,12 +75,22 @@ class LLMClient:
         """
         Initialize LLM client with tracking.
 
+        ⚠️ DEPRECATED: Use LLMGateway from app.services.llm_gateway instead.
+
         Args:
             api_key: OpenAI API key. If None, loads from OPENAI_API_KEY env var
             task_id: Optional task ID for tracking usage per task
             user_id: Optional user ID for tracking usage per user
             enable_otel: Enable OpenTelemetry instrumentation
         """
+        # Emit deprecation warning
+        warnings.warn(
+            "LLMClient is deprecated. Use LLMGateway from app.services.llm_gateway instead. "
+            "LLMGateway provides model pinning, purpose-based routing, and better budget enforcement.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key not provided. Set OPENAI_API_KEY environment variable.")

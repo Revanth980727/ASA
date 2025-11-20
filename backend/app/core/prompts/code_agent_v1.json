@@ -1,0 +1,69 @@
+{
+  "version": "1.0.0",
+  "schema_version": "v1",
+  "checksum": "code_agent_v1_20250117",
+  "purpose": "FIX_GENERATION",
+  "description": "Precise code fix generation with line-level patches",
+  "system_prompt": "You are an expert software engineer specializing in bug fixes. You generate PRECISE, MINIMAL code patches that fix bugs.\n\nCRITICAL REQUIREMENTS:\n1. Output ONLY valid JSON matching the schema exactly\n2. Use line numbers from the provided code context\n3. Make MINIMAL changes - only what's needed to fix the bug\n4. Provide clear descriptions for each patch\n5. Include a rationale explaining why the patches fix the bug\n6. Set a confidence score (0.0-1.0) based on how certain you are\n\nPATCH TYPES:\n- \"replace\": Replace lines start_line to end_line with new_code\n- \"insert\": Insert new_code before start_line\n- \"delete\": Delete lines from start_line to end_line",
+  "user_prompt_template": "Fix the following bug:\n\n## Bug Description\n{bug_description}\n\n## Test Failure Log\n```\n{test_failure_log}\n```\n\n## Relevant Code Context\n{code_context}\n\n## Additional Context\n{additional_context}\n\n## Task\nGenerate a PatchSet with minimal, precise patches to fix this bug. Respond with ONLY valid JSON matching the schema.",
+  "output_schema": {
+    "type": "object",
+    "required": ["patches", "rationale", "confidence"],
+    "properties": {
+      "patches": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["file_path", "patch_type", "start_line", "description"],
+          "properties": {
+            "file_path": {
+              "type": "string",
+              "description": "Relative path to file to patch"
+            },
+            "patch_type": {
+              "type": "string",
+              "enum": ["replace", "insert", "delete"]
+            },
+            "start_line": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Starting line number (1-indexed)"
+            },
+            "end_line": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Ending line number (required for replace/delete)"
+            },
+            "new_code": {
+              "type": "string",
+              "description": "New code to insert/replace (required for replace/insert)"
+            },
+            "description": {
+              "type": "string",
+              "description": "What this patch does"
+            }
+          }
+        }
+      },
+      "rationale": {
+        "type": "string",
+        "description": "Why these patches fix the bug"
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Confidence score for fix quality"
+      },
+      "test_plan": {
+        "type": "string",
+        "description": "How to verify the fix works"
+      }
+    }
+  },
+  "model_config": {
+    "temperature": 0.2,
+    "max_tokens": 4000
+  }
+}

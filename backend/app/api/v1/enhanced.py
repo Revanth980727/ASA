@@ -16,7 +16,7 @@ import asyncio
 import json
 
 from ...database import get_db
-from ...models import Task
+from ...models import Task, Feedback
 from ...schemas import TaskDetail, FeedbackSubmit
 from ...services.workflow_monitor import WorkflowMonitor
 
@@ -237,7 +237,8 @@ def get_task_pr_info(task_id: str, db: Session = Depends(get_db)) -> Dict[str, A
 def submit_feedback(
     task_id: str,
     feedback: FeedbackSubmit,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    x_user_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Submit user feedback for a task (RLHF).
@@ -253,6 +254,7 @@ def submit_feedback(
     Returns:
         {
             "task_id": str,
+            "feedback_id": str,
             "feedback_recorded": bool,
             "message": str
         }
@@ -261,24 +263,101 @@ def submit_feedback(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Store feedback in logs for now (could be separate table later)
-    feedback_entry = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "rating": feedback.rating,
-        "approved": feedback.approved,
-        "comment": feedback.comment,
-        "issues": feedback.issues
-    }
+    # Create feedback record in database
+    feedback_record = Feedback(
+        task_id=task_id,
+        user_id=x_user_id or task.user_id,
+        rating=feedback.rating,
+        approved=feedback.approved,
+        comment=feedback.comment,
+        issues=json.dumps(feedback.issues) if feedback.issues else None,
+        feedback_type="user"
+    )
 
-    feedback_log = f"\n[FEEDBACK] {json.dumps(feedback_entry)}"
-    task.logs = (task.logs or "") + feedback_log
-
+    db.add(feedback_record)
     db.commit()
+    db.refresh(feedback_record)
 
     return {
         "task_id": task_id,
+        "feedback_id": feedback_record.id,
         "feedback_recorded": True,
         "message": "Thank you for your feedback!"
+    }
+
+
+@router.get("/task/{task_id}/feedback")
+def get_feedback(task_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """
+    Get all feedback for a task.
+
+    Returns:
+        {
+            "task_id": str,
+            "feedback": List[dict]
+        }
+    """
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    feedback_records = db.query(Feedback).filter(
+        Feedback.task_id == task_id
+    ).order_by(Feedback.created_at.desc()).all()
+
+    feedback_list = []
+    for fb in feedback_records:
+        feedback_list.append({
+            "id": fb.id,
+            "user_id": fb.user_id,
+            "rating": fb.rating,
+            "approved": fb.approved,
+            "comment": fb.comment,
+            "issues": json.loads(fb.issues) if fb.issues else [],
+            "feedback_type": fb.feedback_type,
+            "created_at": fb.created_at.isoformat() if fb.created_at else None
+        })
+
+    return {
+        "task_id": task_id,
+        "feedback_count": len(feedback_list),
+        "feedback": feedback_list
+    }
+
+
+@router.get("/feedback/aggregate")
+def get_aggregate_feedback(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """
+    Get aggregate feedback statistics for RLHF analysis.
+
+    Returns summary statistics across all feedback.
+    """
+    from sqlalchemy import func
+
+    total_feedback = db.query(func.count(Feedback.id)).scalar()
+
+    approved_count = db.query(func.count(Feedback.id)).filter(
+        Feedback.approved == True
+    ).scalar()
+
+    avg_rating = db.query(func.avg(Feedback.rating)).filter(
+        Feedback.rating.isnot(None)
+    ).scalar()
+
+    # Get feedback by rating
+    rating_distribution = {}
+    for rating in range(1, 6):
+        count = db.query(func.count(Feedback.id)).filter(
+            Feedback.rating == rating
+        ).scalar()
+        rating_distribution[str(rating)] = count
+
+    return {
+        "total_feedback": total_feedback or 0,
+        "approved_count": approved_count or 0,
+        "approval_rate": (approved_count / total_feedback * 100) if total_feedback else 0,
+        "average_rating": float(avg_rating) if avg_rating else None,
+        "rating_distribution": rating_distribution
     }
 
 

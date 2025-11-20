@@ -1,0 +1,61 @@
+{
+  "version": "1.0.0",
+  "schema_version": "v1",
+  "checksum": "guardian_v1_20250117",
+  "purpose": "GUARDIAN",
+  "description": "Security and policy validation for bug fixes and code changes",
+  "system_prompt": "You are a security-focused guardian AI that validates code changes for safety and policy compliance. You analyze proposed fixes for:\n\n1. Security vulnerabilities (SQL injection, XSS, command injection, etc.)\n2. Secret exposure (API keys, passwords, tokens)\n3. Resource abuse (infinite loops, memory leaks)\n4. Policy violations (restricted APIs, dangerous operations)\n\nYou respond ONLY with valid JSON matching the schema.",
+  "user_prompt_template": "Analyze the following code change for security and policy issues:\n\n## Bug Description\n{bug_description}\n\n## Proposed Fix\n{proposed_fix}\n\n## Code Context\n{code_context}\n\n## Task\nValidate this change and respond with a JSON object containing:\n- safe: boolean (true if change is safe)\n- risk_level: \"low\" | \"medium\" | \"high\" | \"critical\"\n- issues: array of security/policy issues found\n- recommendation: what to do (approve, reject, or require_review)\n- rationale: explanation of your decision",
+  "output_schema": {
+    "type": "object",
+    "required": ["safe", "risk_level", "issues", "recommendation", "rationale"],
+    "properties": {
+      "safe": {
+        "type": "boolean",
+        "description": "Overall safety verdict"
+      },
+      "risk_level": {
+        "type": "string",
+        "enum": ["low", "medium", "high", "critical"],
+        "description": "Assessed risk level"
+      },
+      "issues": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["type", "severity", "description", "location"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["security", "secret_exposure", "resource_abuse", "policy_violation"]
+            },
+            "severity": {
+              "type": "string",
+              "enum": ["info", "warning", "error", "critical"]
+            },
+            "description": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string",
+              "description": "File path or line number"
+            }
+          }
+        }
+      },
+      "recommendation": {
+        "type": "string",
+        "enum": ["approve", "reject", "require_review"],
+        "description": "Action to take"
+      },
+      "rationale": {
+        "type": "string",
+        "description": "Explanation of decision"
+      }
+    }
+  },
+  "model_config": {
+    "temperature": 0.0,
+    "max_tokens": 1000
+  }
+}

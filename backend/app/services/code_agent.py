@@ -11,16 +11,12 @@ Generates precise code fixes using LLMs with:
 import os
 import json
 from typing import List, Optional, Dict, Any
-from openai import OpenAI
+from sqlalchemy.orm import Session
 
 from app.services.patch_schema import CodePatch, PatchSet, PatchType
 from app.services.patch_applicator import PatchApplicator
-
-try:
-    from app.services.llm_client import LLMClient
-    HAS_LLM_CLIENT = True
-except ImportError:
-    HAS_LLM_CLIENT = False
+from app.services.llm_gateway import LLMGateway
+from app.core.limits import LLMPurpose
 
 
 class CodeAgent:
@@ -34,29 +30,20 @@ class CodeAgent:
     - Semantic code index
     """
 
-    def __init__(self, api_key: str = None, task_id: Optional[str] = None, user_id: Optional[str] = None):
+    def __init__(self, task_id: Optional[str] = None, user_id: Optional[str] = None, db: Optional[Session] = None):
         """
-        Initialize Code Agent.
+        Initialize Code Agent with LLMGateway.
 
         Args:
-            api_key: OpenAI API key. If None, loads from OPENAI_API_KEY env var.
-            task_id: Optional task ID for usage tracking
+            task_id: Optional task ID for usage tracking and budgets
             user_id: Optional user ID for usage tracking
+            db: Optional database session (creates one if not provided)
         """
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError("OpenAI API key not provided. Set OPENAI_API_KEY environment variable.")
-
         self.task_id = task_id
         self.user_id = user_id
 
-        # Use LLMClient wrapper if available for tracking, otherwise fallback to direct client
-        if HAS_LLM_CLIENT:
-            self.llm_client = LLMClient(api_key=self.api_key, task_id=task_id, user_id=user_id)
-            self.client = None
-        else:
-            self.client = OpenAI(api_key=self.api_key)
-            self.llm_client = None
+        # Use LLMGateway for all LLM calls (with model pinning and budgets)
+        self.llm_gateway = LLMGateway(task_id=task_id, user_id=user_id, db=db)
 
     def generate_fix(
         self,
@@ -85,7 +72,7 @@ class CodeAgent:
             additional_context=additional_context
         )
 
-        # Call LLM (with tracking if available)
+        # Call LLM using gateway (with model pinning and budget enforcement)
         try:
             messages = [
                 {
@@ -98,31 +85,26 @@ class CodeAgent:
                 }
             ]
 
-            if self.llm_client:
-                # Use tracked client
-                response = self.llm_client.chat_completion(
-                    messages=messages,
-                    model="gpt-4",
-                    temperature=0.2,
-                    max_tokens=3000
-                )
-            else:
-                # Fallback to direct client
-                response = self.client.chat.completions.create(
-                    model="gpt-4",
-                    messages=messages,
-                    temperature=0.2,
-                    max_tokens=3000
-                )
+            # Use LLMGateway with FIX_GENERATION purpose
+            # This automatically uses the correct model and enforces budgets
+            response_text = self.llm_gateway.chat_completion(
+                purpose=LLMPurpose.FIX_GENERATION,
+                messages=messages,
+                metadata={"bug_description": bug_description[:100]}
+            )
 
             # Parse response
-            patch_json = response.choices[0].message.content.strip()
+            patch_json = response_text.strip()
 
             # Extract JSON from markdown if needed
             patch_json = self._extract_json(patch_json)
 
+            # Parse JSON and auto-correct common issues
+            patch_data = json.loads(patch_json)
+            patch_data = self._auto_correct_patches(patch_data)
+
             # Parse into PatchSet
-            patch_set = PatchSet.from_json(patch_json)
+            patch_set = PatchSet.from_dict(patch_data)
 
             print(f"Generated {len(patch_set.patches)} patch(es)")
             return patch_set
@@ -167,9 +149,14 @@ OUTPUT SCHEMA:
   "rationale": "Why these patches fix the bug"
 }
 
-IMPORTANT:
-- Line numbers are 1-indexed
-- end_line is inclusive
+IMPORTANT LINE NUMBERING RULES:
+- Line numbers are 1-indexed (first line is 1, not 0)
+- start_line must be >= 1
+- end_line must be >= start_line (NEVER set end_line to 0)
+- end_line is inclusive (to replace line 10, use start_line=10, end_line=10)
+- For INSERT operations, set end_line = start_line
+
+OTHER RULES:
 - Preserve exact indentation in new_code
 - Include complete function/method bodies
 - Use \\n for newlines in JSON strings"""
@@ -241,6 +228,47 @@ IMPORTANT:
                         return response[start:start+i+1]
 
         return response.strip()
+
+    def _auto_correct_patches(self, patch_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Auto-correct common issues in LLM-generated patches.
+
+        Fixes:
+        - end_line < start_line (sets end_line = start_line)
+        - end_line = 0 (sets end_line = start_line)
+        - start_line < 1 (sets start_line = 1)
+
+        Args:
+            patch_data: Raw patch data from LLM
+
+        Returns:
+            Corrected patch data
+        """
+        if "patches" not in patch_data:
+            return patch_data
+
+        for i, patch in enumerate(patch_data["patches"]):
+            original_start = patch.get("start_line", 1)
+            original_end = patch.get("end_line", 1)
+
+            # Fix start_line if invalid
+            if original_start < 1:
+                print(f"Warning: Patch {i+1} has invalid start_line ({original_start}), correcting to 1")
+                patch["start_line"] = 1
+
+            # Fix end_line if invalid
+            if original_end < patch["start_line"]:
+                print(f"Warning: Patch {i+1} has invalid end_line ({original_end}) < start_line ({patch['start_line']})")
+                print(f"  Auto-correcting: end_line = start_line = {patch['start_line']}")
+                patch["end_line"] = patch["start_line"]
+
+            # Special case: for INSERT operations, end_line should equal start_line
+            if patch.get("patch_type") == "insert":
+                if patch["end_line"] != patch["start_line"]:
+                    print(f"Warning: INSERT patch {i+1} has end_line != start_line, correcting")
+                    patch["end_line"] = patch["start_line"]
+
+        return patch_data
 
     def apply_fix(
         self,

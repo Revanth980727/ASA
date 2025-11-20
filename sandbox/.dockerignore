@@ -1,0 +1,29 @@
+# Ignore sensitive files
+.env
+.env.local
+*.key
+*.pem
+*.p12
+
+# Ignore build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.so
+.pytest_cache/
+.mypy_cache/
+node_modules/
+dist/
+build/
+
+# Ignore logs
+*.log
+logs/
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore git
+.git/
+.gitignore

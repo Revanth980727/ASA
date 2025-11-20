@@ -99,7 +99,7 @@ class DockerSandbox:
         cmd = [
             'docker', 'run',
             '--rm',  # Remove container after execution
-            '--network', 'host',  # Allow access to localhost
+            '--network', 'none',  # Disable network access for security
             '-v', f'{workspace}:/workspace',  # Mount workspace
             '-w', '/workspace',  # Set working directory
             self.image,
@@ -128,7 +128,8 @@ class DockerSandbox:
         self,
         command: str,
         workspace_path: str,
-        timeout: int = 30
+        timeout: int = 30,
+        allow_network: bool = False
     ) -> Tuple[int, str, str]:
         """
         Run an arbitrary command in a Docker container.
@@ -137,15 +138,20 @@ class DockerSandbox:
             command: Command to run
             workspace_path: Path to mount as workspace
             timeout: Timeout in seconds
+            allow_network: Allow network access (only for trusted setup operations)
 
         Returns:
             Tuple of (exit_code, stdout, stderr)
         """
         workspace = Path(workspace_path).resolve()
 
+        # Use network isolation by default for security
+        network_mode = 'host' if allow_network else 'none'
+
         cmd = [
             'docker', 'run',
             '--rm',
+            '--network', network_mode,  # Disable network by default for security
             '-v', f'{workspace}:/workspace',
             '-w', '/workspace',
             self.image,
@@ -212,11 +218,13 @@ module.exports = {
             print("Created playwright.config.js")
 
         # Install dependencies using Docker
+        # Note: This requires network access, so we allow it for this trusted setup operation
         print("Installing Playwright dependencies...")
         exit_code, stdout, stderr = self.run_command(
             "npm install",
             str(workspace),
-            timeout=120
+            timeout=120,
+            allow_network=True  # Network required for npm install
         )
 
         if exit_code != 0:

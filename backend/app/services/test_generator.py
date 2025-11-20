@@ -8,41 +8,29 @@ import os
 import json
 from typing import Optional
 from pathlib import Path
-from openai import OpenAI
+from sqlalchemy.orm import Session
 
-try:
-    from app.services.llm_client import LLMClient
-    HAS_LLM_CLIENT = True
-except ImportError:
-    HAS_LLM_CLIENT = False
+from app.services.llm_gateway import LLMGateway
+from app.core.limits import LLMPurpose
 
 
 class TestGenerator:
     """Generate Playwright E2E tests from bug descriptions."""
 
-    def __init__(self, api_key: str = None, task_id: Optional[str] = None, user_id: Optional[str] = None):
+    def __init__(self, task_id: Optional[str] = None, user_id: Optional[str] = None, db: Optional[Session] = None):
         """
-        Initialize test generator.
+        Initialize test generator with LLMGateway.
 
         Args:
-            api_key: OpenAI API key. If None, will try to load from OPENAI_API_KEY env var.
-            task_id: Optional task ID for usage tracking
+            task_id: Optional task ID for usage tracking and budgets
             user_id: Optional user ID for usage tracking
+            db: Optional database session (creates one if not provided)
         """
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError("OpenAI API key not provided. Set OPENAI_API_KEY environment variable.")
-
         self.task_id = task_id
         self.user_id = user_id
 
-        # Use LLMClient wrapper if available for tracking, otherwise fallback to direct client
-        if HAS_LLM_CLIENT:
-            self.llm_client = LLMClient(api_key=self.api_key, task_id=task_id, user_id=user_id)
-            self.client = None
-        else:
-            self.client = OpenAI(api_key=self.api_key)
-            self.llm_client = None
+        # Use LLMGateway for all LLM calls (with model pinning and budgets)
+        self.llm_gateway = LLMGateway(task_id=task_id, user_id=user_id, db=db)
 
     def generate_test(self, bug_description: str, app_context: str = "") -> str:
         """
@@ -70,24 +58,15 @@ class TestGenerator:
                 }
             ]
 
-            if self.llm_client:
-                # Use tracked client
-                response = self.llm_client.chat_completion(
-                    messages=messages,
-                    model="gpt-4",
-                    temperature=0.3,
-                    max_tokens=1500
-                )
-            else:
-                # Fallback to direct client
-                response = self.client.chat.completions.create(
-                    model="gpt-4",
-                    messages=messages,
-                    temperature=0.3,
-                    max_tokens=1500
-                )
+            # Use LLMGateway with TEST_GENERATION purpose
+            # This automatically uses the correct model and enforces budgets
+            response_text = self.llm_gateway.chat_completion(
+                purpose=LLMPurpose.TEST_GENERATION,
+                messages=messages,
+                metadata={"bug_description": bug_description[:100]}
+            )
 
-            test_code = response.choices[0].message.content.strip()
+            test_code = response_text.strip()
 
             # Extract code from markdown if present
             if "```javascript" in test_code or "```typescript" in test_code:

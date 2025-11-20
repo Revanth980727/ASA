@@ -10,48 +10,36 @@ import os
 import json
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-from openai import OpenAI
+from sqlalchemy.orm import Session
 
 from app.services.code_index import CodeIndex, CodeSnippet
+from app.services.llm_gateway import LLMGateway
+from app.core.limits import LLMPurpose
+
 try:
     from app.services.semantic_index import SemanticCodeIndex, SearchResult
 except ImportError:
     SemanticCodeIndex = None
     SearchResult = None
 
-try:
-    from app.services.llm_client import LLMClient
-    HAS_LLM_CLIENT = True
-except ImportError:
-    HAS_LLM_CLIENT = False
-
 
 class FixAgent:
     """LLM-driven agent for generating code fixes."""
 
-    def __init__(self, api_key: str = None, task_id: Optional[str] = None, user_id: Optional[str] = None):
+    def __init__(self, task_id: Optional[str] = None, user_id: Optional[str] = None, db: Optional[Session] = None):
         """
-        Initialize FixAgent with OpenAI API key.
+        Initialize FixAgent with LLMGateway.
 
         Args:
-            api_key: OpenAI API key. If None, will try to load from OPENAI_API_KEY env var.
-            task_id: Optional task ID for usage tracking
+            task_id: Optional task ID for usage tracking and budgets
             user_id: Optional user ID for usage tracking
+            db: Optional database session (creates one if not provided)
         """
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError("OpenAI API key not provided. Set OPENAI_API_KEY environment variable.")
-
         self.task_id = task_id
         self.user_id = user_id
 
-        # Use LLMClient wrapper if available for tracking, otherwise fallback to direct client
-        if HAS_LLM_CLIENT:
-            self.llm_client = LLMClient(api_key=self.api_key, task_id=task_id, user_id=user_id)
-            self.client = None  # Use llm_client instead
-        else:
-            self.client = OpenAI(api_key=self.api_key)
-            self.llm_client = None
+        # Use LLMGateway for all LLM calls (with model pinning and budgets)
+        self.llm_gateway = LLMGateway(task_id=task_id, user_id=user_id, db=db)
 
     def generate_patch(self, task, failing_output: str, code_index) -> List[Dict[str, str]]:
         """
@@ -88,7 +76,7 @@ class FixAgent:
             code_context=context
         )
 
-        # Call OpenAI API (with tracking if available)
+        # Call LLM using gateway (with model pinning and budget enforcement)
         try:
             messages = [
                 {
@@ -102,25 +90,16 @@ class FixAgent:
                 }
             ]
 
-            if self.llm_client:
-                # Use tracked client
-                response = self.llm_client.chat_completion(
-                    messages=messages,
-                    model="gpt-4",
-                    temperature=0.2,
-                    max_tokens=2000
-                )
-            else:
-                # Fallback to direct client
-                response = self.client.chat.completions.create(
-                    model="gpt-4",
-                    messages=messages,
-                    temperature=0.2,
-                    max_tokens=2000
-                )
+            # Use LLMGateway with FIX_GENERATION purpose
+            # This automatically uses the correct model and enforces budgets
+            response_text = self.llm_gateway.chat_completion(
+                purpose=LLMPurpose.FIX_GENERATION,
+                messages=messages,
+                metadata={"bug_description": task.bug_description[:100]}
+            )
 
             # Parse the response
-            patch_json = response.choices[0].message.content.strip()
+            patch_json = response_text.strip()
 
             # Extract JSON from markdown code blocks if present
             if "```json" in patch_json:

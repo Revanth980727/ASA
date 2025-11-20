@@ -31,25 +31,56 @@ class CodeIndex:
                 print(f"Error reading {py_file}: {e}")
 
     def search(self, bug_description: str, max_results: int = 10) -> list[CodeSnippet]:
-        """Simple search: split bug_description into words, find files containing any word."""
-        words = bug_description.lower().split()
+        """
+        Improved search: find lines matching keywords and return context around them.
+
+        Returns snippets with 10 lines before and 10 lines after each match.
+        """
+        words = [w.lower() for w in bug_description.split() if len(w) > 2]  # Skip short words
         matching_snippets = []
 
         for file_path, content in self.file_contents.items():
+            lines = content.split('\n')
             content_lower = content.lower()
-            if any(word in content_lower for word in words):
-                # Get first 40 lines as snippet
-                lines = content.split('\n')[:40]
-                snippet = '\n'.join(lines)
+
+            # Find all matching line numbers
+            matching_lines = []
+            for line_num, line in enumerate(lines, 1):
+                line_lower = line.lower()
+                if any(word in line_lower for word in words):
+                    matching_lines.append(line_num)
+
+            # Group nearby matches and create snippets
+            if matching_lines:
+                # Take first match with context
+                match_line = matching_lines[0]
+                start_line = max(1, match_line - 10)
+                end_line = min(len(lines), match_line + 10)
+
+                snippet_lines = lines[start_line-1:end_line]
+                snippet = '\n'.join(snippet_lines)
+
                 code_snippet = CodeSnippet(
                     file_path=file_path,
-                    start_line=1,
-                    end_line=min(40, len(lines)),
+                    start_line=start_line,
+                    end_line=end_line,
                     snippet=snippet
                 )
                 matching_snippets.append(code_snippet)
 
                 if len(matching_snippets) >= max_results:
                     break
+
+        # If no matches found, return first 40 lines of first few files as fallback
+        if not matching_snippets:
+            for file_path, content in list(self.file_contents.items())[:max_results]:
+                lines = content.split('\n')[:40]
+                snippet = '\n'.join(lines)
+                matching_snippets.append(CodeSnippet(
+                    file_path=file_path,
+                    start_line=1,
+                    end_line=min(40, len(lines)),
+                    snippet=snippet
+                ))
 
         return matching_snippets

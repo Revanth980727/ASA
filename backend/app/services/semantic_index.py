@@ -198,6 +198,8 @@ class SemanticCodeIndex:
             "total_nodes": len(self.code_nodes),
             "functions": sum(1 for n in self.code_nodes if n.type == 'function'),
             "classes": sum(1 for n in self.code_nodes if n.type == 'class'),
+            "imports": sum(1 for n in self.code_nodes if n.type == 'import'),
+            "module_level": sum(1 for n in self.code_nodes if n.type == 'module_level'),
             "methods": sum(1 for n in self.code_nodes if n.type == 'method'),
             "collection_count": self.collection.count() if self.collection else 0
         }

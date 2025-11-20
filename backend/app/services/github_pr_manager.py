@@ -13,6 +13,9 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from github import Github, GithubException
 from urllib.parse import urlparse
+from sqlalchemy.orm import Session
+
+from app.services.run_report import generate_pr_body_for_task
 
 
 class GitHubPRManager:
@@ -116,39 +119,56 @@ class GitHubPRManager:
         repo_url: str,
         head_branch: str,
         base_branch: str,
-        bug_description: str,
-        fix_summary: str,
+        task_id: str,
+        db: Session,
+        bug_description: Optional[str] = None,
+        fix_summary: Optional[str] = None,
         test_results_before: Optional[str] = None,
         test_results_after: Optional[str] = None,
         patches_applied: Optional[List[Dict[str, Any]]] = None,
         confidence_score: Optional[float] = None
     ) -> Dict[str, Any]:
         """
-        Create a PR for a bug fix with comprehensive template.
+        Create a PR for a bug fix with comprehensive template from RunReport.
 
         Args:
             repo_url: Repository URL
             head_branch: Source branch
             base_branch: Target branch
-            bug_description: Original bug description
-            fix_summary: Summary of the fix
-            test_results_before: Test output before fix
-            test_results_after: Test output after fix
-            patches_applied: List of patches applied
-            confidence_score: AI confidence score (0-1)
+            task_id: Task ID for RunReport generation
+            db: Database session
+            bug_description: Original bug description (legacy, falls back if no task)
+            fix_summary: Summary of the fix (legacy)
+            test_results_before: Test output before fix (legacy)
+            test_results_after: Test output after fix (legacy)
+            patches_applied: List of patches applied (legacy)
+            confidence_score: AI confidence score (legacy)
 
         Returns:
             PR information dictionary
         """
-        title = self._generate_pr_title(bug_description)
-        body = self._generate_pr_body(
-            bug_description=bug_description,
-            fix_summary=fix_summary,
-            test_results_before=test_results_before,
-            test_results_after=test_results_after,
-            patches_applied=patches_applied,
-            confidence_score=confidence_score
-        )
+        # Generate PR body using RunReport (uses the comprehensive template)
+        try:
+            body = generate_pr_body_for_task(task_id, db)
+            # Extract title from bug_description in task
+            from app.models import Task
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if task and task.bug_description:
+                title = self._generate_pr_title(task.bug_description)
+            else:
+                title = self._generate_pr_title(bug_description or "Automated bug fix")
+        except Exception as e:
+            # Fallback to legacy method if RunReport fails
+            print(f"⚠️ RunReport generation failed, using legacy method: {e}")
+            title = self._generate_pr_title(bug_description or "Automated bug fix")
+            body = self._generate_pr_body(
+                bug_description=bug_description or "Bug fix",
+                fix_summary=fix_summary or "Automated fix",
+                test_results_before=test_results_before,
+                test_results_after=test_results_after,
+                patches_applied=patches_applied,
+                confidence_score=confidence_score
+            )
 
         return self.create_pull_request(
             repo_url=repo_url,
@@ -322,23 +342,25 @@ def create_automated_pr(
     repo_url: str,
     branch_name: str,
     task_id: str,
-    bug_description: str,
-    patch_set: Any,
+    db: Session,
+    bug_description: Optional[str] = None,
+    patch_set: Optional[Any] = None,
     test_results_before: Optional[str] = None,
     test_results_after: Optional[str] = None,
     github_token: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Convenience function: Create PR with all ASA context.
+    Convenience function: Create PR with all ASA context using RunReport.
 
     Args:
         repo_url: Repository URL
         branch_name: Branch with fixes
-        task_id: ASA task ID
-        bug_description: Bug description
-        patch_set: PatchSet object with fixes
-        test_results_before: Test output before fix
-        test_results_after: Test output after fix
+        task_id: ASA task ID (required for RunReport)
+        db: Database session (required for RunReport)
+        bug_description: Bug description (legacy, optional)
+        patch_set: PatchSet object with fixes (legacy, optional)
+        test_results_before: Test output before fix (legacy, optional)
+        test_results_after: Test output after fix (legacy, optional)
         github_token: Optional GitHub token
 
     Returns:
@@ -346,29 +368,33 @@ def create_automated_pr(
     """
     manager = GitHubPRManager(github_token=github_token)
 
-    # Extract patch information
-    patches_info = [
-        {
-            "file_path": p.file_path,
-            "start_line": p.start_line,
-            "end_line": p.end_line,
-            "patch_type": p.patch_type.value,
-            "description": p.description
-        }
-        for p in patch_set.patches
-    ]
+    # Extract patch information if provided (legacy)
+    patches_info = None
+    if patch_set and hasattr(patch_set, 'patches'):
+        patches_info = [
+            {
+                "file_path": p.file_path,
+                "start_line": p.start_line,
+                "end_line": p.end_line,
+                "patch_type": p.patch_type.value,
+                "description": p.description
+            }
+            for p in patch_set.patches
+        ]
 
-    # Create PR
+    # Create PR using RunReport
     pr_info = manager.create_fix_pr(
         repo_url=repo_url,
         head_branch=branch_name,
         base_branch="main",  # TODO: Make configurable
+        task_id=task_id,
+        db=db,
         bug_description=bug_description,
-        fix_summary=patch_set.rationale,
+        fix_summary=patch_set.rationale if patch_set and hasattr(patch_set, 'rationale') else None,
         test_results_before=test_results_before,
         test_results_after=test_results_after,
         patches_applied=patches_info,
-        confidence_score=patch_set.confidence
+        confidence_score=patch_set.confidence if patch_set and hasattr(patch_set, 'confidence') else None
     )
 
     return pr_info

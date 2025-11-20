@@ -1,0 +1,227 @@
+[
+  {
+    "name": "python_simple_syntax_error",
+    "repo_url": "https://github.com/example/python-syntax-bug",
+    "bug_description": "Function has missing colon after function definition causing SyntaxError",
+    "test_command": "pytest tests/",
+    "expected_behavior": "All tests should pass after adding missing colon",
+    "difficulty": "easy",
+    "category": "syntax"
+  },
+  {
+    "name": "python_undefined_variable",
+    "repo_url": "https://github.com/example/undefined-var-bug",
+    "bug_description": "NameError: variable is referenced before assignment in helper function",
+    "test_command": "pytest tests/test_helpers.py",
+    "expected_behavior": "Variable should be defined before use",
+    "difficulty": "easy",
+    "category": "logic"
+  },
+  {
+    "name": "python_type_error_string_int",
+    "repo_url": "https://github.com/example/type-error-bug",
+    "bug_description": "TypeError when concatenating string with integer in format function",
+    "test_command": "python -m pytest",
+    "expected_behavior": "Should properly convert integer to string before concatenation",
+    "difficulty": "easy",
+    "category": "type"
+  },
+  {
+    "name": "javascript_null_reference",
+    "repo_url": "https://github.com/example/js-null-bug",
+    "bug_description": "Cannot read property of null in user profile component",
+    "test_command": "npm test",
+    "expected_behavior": "Add null check before accessing property",
+    "difficulty": "medium",
+    "category": "logic"
+  },
+  {
+    "name": "python_index_out_of_bounds",
+    "repo_url": "https://github.com/example/index-bug",
+    "bug_description": "IndexError: list index out of range when processing empty arrays",
+    "test_command": "pytest tests/test_array_processor.py",
+    "expected_behavior": "Check array length before accessing elements",
+    "difficulty": "medium",
+    "category": "logic"
+  },
+  {
+    "name": "python_division_by_zero",
+    "repo_url": "https://github.com/example/division-bug",
+    "bug_description": "ZeroDivisionError in statistics calculation when dataset is empty",
+    "test_command": "pytest tests/test_stats.py",
+    "expected_behavior": "Handle empty dataset case before division",
+    "difficulty": "medium",
+    "category": "logic"
+  },
+  {
+    "name": "python_missing_import",
+    "repo_url": "https://github.com/example/import-bug",
+    "bug_description": "ModuleNotFoundError: missing import statement for datetime module",
+    "test_command": "python -m pytest tests/",
+    "expected_behavior": "Add missing import statement at top of file",
+    "difficulty": "easy",
+    "category": "import"
+  },
+  {
+    "name": "python_wrong_indentation",
+    "repo_url": "https://github.com/example/indent-bug",
+    "bug_description": "IndentationError in conditional block causing unexpected behavior",
+    "test_command": "pytest",
+    "expected_behavior": "Fix indentation to match expected block structure",
+    "difficulty": "easy",
+    "category": "syntax"
+  },
+  {
+    "name": "python_incorrect_comparison",
+    "repo_url": "https://github.com/example/comparison-bug",
+    "bug_description": "Using assignment (=) instead of comparison (==) in if statement",
+    "test_command": "pytest tests/test_validators.py",
+    "expected_behavior": "Change assignment to comparison operator",
+    "difficulty": "easy",
+    "category": "logic"
+  },
+  {
+    "name": "python_off_by_one_error",
+    "repo_url": "https://github.com/example/off-by-one-bug",
+    "bug_description": "Loop iterates one time too many causing IndexError",
+    "test_command": "pytest tests/test_loops.py",
+    "expected_behavior": "Adjust range to prevent accessing beyond array bounds",
+    "difficulty": "medium",
+    "category": "logic"
+  },
+  {
+    "name": "python_infinite_loop",
+    "repo_url": "https://github.com/example/infinite-loop-bug",
+    "bug_description": "Loop condition never becomes false causing hang",
+    "test_command": "timeout 5s pytest tests/test_processing.py",
+    "expected_behavior": "Fix loop condition or add proper exit condition",
+    "difficulty": "hard",
+    "category": "logic"
+  },
+  {
+    "name": "python_race_condition",
+    "repo_url": "https://github.com/example/race-condition-bug",
+    "bug_description": "Concurrent access to shared resource without proper locking",
+    "test_command": "pytest tests/test_concurrent.py -n 4",
+    "expected_behavior": "Add threading lock to protect shared resource",
+    "difficulty": "hard",
+    "category": "concurrency"
+  },
+  {
+    "name": "python_incorrect_exception_handling",
+    "repo_url": "https://github.com/example/exception-bug",
+    "bug_description": "Catching wrong exception type causing errors to be missed",
+    "test_command": "pytest tests/test_error_handling.py",
+    "expected_behavior": "Catch correct exception type or use broader exception",
+    "difficulty": "medium",
+    "category": "error_handling"
+  },
+  {
+    "name": "python_memory_leak",
+    "repo_url": "https://github.com/example/memory-leak-bug",
+    "bug_description": "Circular reference preventing garbage collection",
+    "test_command": "pytest tests/test_memory.py",
+    "expected_behavior": "Break circular reference or use weak references",
+    "difficulty": "hard",
+    "category": "memory"
+  },
+  {
+    "name": "python_incorrect_default_mutable",
+    "repo_url": "https://github.com/example/mutable-default-bug",
+    "bug_description": "Using mutable default argument causing unexpected state sharing",
+    "test_command": "pytest tests/test_functions.py",
+    "expected_behavior": "Use None as default and initialize inside function",
+    "difficulty": "medium",
+    "category": "python_specific"
+  },
+  {
+    "name": "python_incorrect_regex",
+    "repo_url": "https://github.com/example/regex-bug",
+    "bug_description": "Regular expression not matching expected patterns",
+    "test_command": "pytest tests/test_parser.py",
+    "expected_behavior": "Fix regex pattern to correctly match input format",
+    "difficulty": "hard",
+    "category": "parsing"
+  },
+  {
+    "name": "python_api_integration_error",
+    "repo_url": "https://github.com/example/api-integration-bug",
+    "bug_description": "API endpoint not handling error responses correctly",
+    "test_command": "pytest tests/test_api_client.py",
+    "expected_behavior": "Add proper error handling for non-200 responses",
+    "difficulty": "medium",
+    "category": "integration"
+  },
+  {
+    "name": "python_datetime_timezone_bug",
+    "repo_url": "https://github.com/example/timezone-bug",
+    "bug_description": "Naive datetime comparison causing incorrect ordering",
+    "test_command": "pytest tests/test_datetime.py",
+    "expected_behavior": "Use timezone-aware datetime objects",
+    "difficulty": "hard",
+    "category": "datetime"
+  },
+  {
+    "name": "python_incorrect_string_encoding",
+    "repo_url": "https://github.com/example/encoding-bug",
+    "bug_description": "UnicodeDecodeError when reading file with non-ASCII characters",
+    "test_command": "pytest tests/test_file_io.py",
+    "expected_behavior": "Specify correct encoding when opening file",
+    "difficulty": "medium",
+    "category": "encoding"
+  },
+  {
+    "name": "python_incorrect_json_serialization",
+    "repo_url": "https://github.com/example/json-bug",
+    "bug_description": "TypeError when serializing datetime objects to JSON",
+    "test_command": "pytest tests/test_serialization.py",
+    "expected_behavior": "Implement custom JSON encoder for datetime",
+    "difficulty": "medium",
+    "category": "serialization"
+  },
+  {
+    "name": "python_sql_injection_vulnerability",
+    "repo_url": "https://github.com/example/sql-injection-bug",
+    "bug_description": "String concatenation in SQL query allowing injection",
+    "test_command": "pytest tests/test_database.py",
+    "expected_behavior": "Use parameterized queries instead of string concatenation",
+    "difficulty": "hard",
+    "category": "security"
+  },
+  {
+    "name": "python_incorrect_async_await",
+    "repo_url": "https://github.com/example/async-bug",
+    "bug_description": "Missing await keyword causing coroutine not to execute",
+    "test_command": "pytest tests/test_async.py",
+    "expected_behavior": "Add await keyword before async function call",
+    "difficulty": "medium",
+    "category": "async"
+  },
+  {
+    "name": "python_file_not_closed",
+    "repo_url": "https://github.com/example/file-handle-bug",
+    "bug_description": "File handle not closed causing resource leak",
+    "test_command": "pytest tests/test_file_operations.py",
+    "expected_behavior": "Use context manager (with statement) for file operations",
+    "difficulty": "easy",
+    "category": "resource_management"
+  },
+  {
+    "name": "python_incorrect_decorator_usage",
+    "repo_url": "https://github.com/example/decorator-bug",
+    "bug_description": "Decorator not preserving function metadata",
+    "test_command": "pytest tests/test_decorators.py",
+    "expected_behavior": "Use functools.wraps to preserve function metadata",
+    "difficulty": "hard",
+    "category": "python_specific"
+  },
+  {
+    "name": "python_global_state_bug",
+    "repo_url": "https://github.com/example/global-state-bug",
+    "bug_description": "Tests failing due to shared global state between test runs",
+    "test_command": "pytest tests/ -v",
+    "expected_behavior": "Reset global state in setup/teardown or avoid global state",
+    "difficulty": "hard",
+    "category": "testing"
+  }
+]

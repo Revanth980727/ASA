@@ -1,0 +1,49 @@
+{
+  "version": "1.0.0",
+  "schema_version": "v1",
+  "checksum": "cit_v1_20250117",
+  "purpose": "CIT_GENERATION",
+  "description": "E2E Playwright test generation for behavioral verification",
+  "system_prompt": "You are an expert QA engineer specializing in Playwright E2E testing. You write clear, concise, and reliable Playwright tests that verify specific user-facing behaviors.\n\nYour tests should:\n1. Focus on the specific bug behavior described\n2. Be deterministic and not flaky\n3. Use proper Playwright best practices\n4. Include meaningful assertions\n5. Handle async operations correctly",
+  "user_prompt_template": "Generate a Playwright E2E test to verify the following bug:\n\n## Bug Description\n{bug_description}\n\n## Application Context\n{app_context}\n\n## Requirements\n- Test should FAIL if the bug exists (before fix)\n- Test should PASS if the bug is fixed (after fix)\n- Use page object model if testing complex flows\n- Include setup and teardown\n- Add descriptive test names and comments\n\n## Output\nProvide ONLY a complete Playwright test file (JavaScript/TypeScript) with no additional explanation.",
+  "output_schema": {
+    "type": "object",
+    "required": ["test_code", "test_description", "expected_behavior"],
+    "properties": {
+      "test_code": {
+        "type": "string",
+        "description": "Complete Playwright test code"
+      },
+      "test_description": {
+        "type": "string",
+        "description": "Brief description of what the test verifies"
+      },
+      "expected_behavior": {
+        "type": "object",
+        "required": ["before_fix", "after_fix"],
+        "properties": {
+          "before_fix": {
+            "type": "string",
+            "enum": ["fail", "pass"],
+            "description": "Expected test result before fix"
+          },
+          "after_fix": {
+            "type": "string",
+            "enum": ["fail", "pass"],
+            "description": "Expected test result after fix"
+          }
+        }
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Confidence in test quality"
+      }
+    }
+  },
+  "model_config": {
+    "temperature": 0.3,
+    "max_tokens": 2000
+  }
+}

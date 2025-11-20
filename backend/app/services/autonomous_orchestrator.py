@@ -41,21 +41,24 @@ class AutonomousOrchestrator:
     - State persistence
     """
 
-    def __init__(self, db: Session, enable_cit: bool = None):
+    def __init__(self, db: Session = None, enable_cit: bool = None, cancellation_callback=None):
         """
         Initialize orchestrator.
 
         Args:
-            db: Database session
+            db: Database session (optional, will create one if not provided)
             enable_cit: Enable CIT Agent (overrides env var if provided)
+            cancellation_callback: Optional callback function to check if task should be cancelled
         """
-        self.db = db
+        self.db = db if db is not None else SessionLocal()
+        self._owns_db = db is None  # Track if we created the session
 
         # Check CIT enablement
         if enable_cit is None:
             enable_cit = os.getenv("ENABLE_CIT_AGENT", "false").lower() == "true"
 
         self.enable_cit = enable_cit
+        self.cancellation_callback = cancellation_callback
 
     @staticmethod
     def start_task(task_id: str) -> None:
@@ -182,6 +185,9 @@ class AutonomousOrchestrator:
         elif state == TaskState.CREATING_PR_BRANCH:
             return self._state_create_pr_branch(task_id)
 
+        elif state == TaskState.RETRY:
+            return self._state_retry(task_id)
+
         else:
             raise ValueError(f"Unknown state: {state}")
 
@@ -197,7 +203,7 @@ class AutonomousOrchestrator:
         task = self.db.query(Task).filter(Task.id == task_id).first()
 
         try:
-            from src.core.repo_manager import create_workspace, clone_repo
+            from app.services.repo_manager import create_workspace, clone_repo
 
             workspace_path = create_workspace(task_id)
             task.workspace_path = workspace_path
@@ -219,25 +225,37 @@ class AutonomousOrchestrator:
         try:
             # Try semantic indexing first
             try:
+                self._log(task_id, "Attempting semantic indexing...")
                 from app.services.semantic_index import SemanticCodeIndex
 
+                self._log(task_id, f"Creating semantic index for {task.workspace_path}")
                 index = SemanticCodeIndex(task.workspace_path)
+
+                self._log(task_id, "Building index...")
                 index.build_index()
+
                 stats = index.get_stats()
                 self._log(task_id, f"Semantic index: {stats['total_nodes']} nodes")
 
-            except ImportError:
+            except ImportError as ie:
                 # Fall back to simple index
+                self._log(task_id, f"Semantic indexing not available ({ie}), using simple index...")
                 from app.services.code_index import CodeIndex
 
+                self._log(task_id, f"Creating simple index for {task.workspace_path}")
                 index = CodeIndex(task.workspace_path)
+
+                self._log(task_id, "Building index...")
                 index.build_index()
+
                 self._log(task_id, f"Simple index: {len(index.file_contents)} files")
 
             return "success"
 
         except Exception as e:
-            self._log(task_id, f"Indexing failed: {e}")
+            import traceback
+            error_details = traceback.format_exc()
+            self._log(task_id, f"Indexing failed: {e}\n{error_details}")
             return "failure"
 
     def _state_verify_bug_behavior(self, task_id: str) -> str:
@@ -301,21 +319,34 @@ class AutonomousOrchestrator:
                 from app.services.code_agent import CodeAgent
                 from app.services.patch_applicator import PatchApplicator
 
-                # Build index
+                # Build index and get context
                 try:
                     from app.services.semantic_index import SemanticCodeIndex
                     index = SemanticCodeIndex(task.workspace_path)
                     index.build_index()
-                    code_context = index.get_context(task.bug_description, max_results=5)
+                    # Increased from 5 to 10 for better coverage
+                    code_context = index.get_context(task.bug_description, max_results=10)
+
+                    # If no results found, add a warning
+                    if "No relevant code found" in code_context:
+                        self._log(task_id, "Warning: Semantic search found no results, adding file list")
+                        code_context += self._get_file_list_context(task.workspace_path)
+
                 except ImportError:
                     from app.services.code_index import CodeIndex
                     index = CodeIndex(task.workspace_path)
                     index.build_index()
-                    snippets = index.search(task.bug_description, max_results=5)
-                    context_parts = [
-                        f"### {s.file_path} (lines {s.start_line}-{s.end_line})\n```python\n{s.snippet}\n```"
-                        for s in snippets
-                    ]
+                    # Increased from 5 to 10 for better coverage
+                    snippets = index.search(task.bug_description, max_results=10)
+
+                    if not snippets:
+                        self._log(task_id, "Warning: No code snippets found, adding file list")
+                        context_parts = [self._get_file_list_context(task.workspace_path)]
+                    else:
+                        context_parts = [
+                            f"### {s.file_path} (lines {s.start_line}-{s.end_line})\n```python\n{s.snippet}\n```"
+                            for s in snippets
+                        ]
                     code_context = "\n\n".join(context_parts)
 
                 # Generate fix
@@ -427,7 +458,38 @@ class AutonomousOrchestrator:
             self._log(task_id, f"PR branch creation failed (non-fatal): {e}")
             return "failure"  # Still mark as success overall
 
+    def _state_retry(self, task_id: str) -> str:
+        """
+        Handle retry state.
+
+        The state machine handles the retry logic automatically,
+        so this method just returns success to trigger the transition.
+        """
+        self._log(task_id, "Retrying previous operation...")
+        return "success"
+
     # Utility methods
+
+    def _get_file_list_context(self, workspace_path: str) -> str:
+        """Get a list of all Python files as fallback context."""
+        from pathlib import Path
+
+        workspace = Path(workspace_path)
+        python_files = []
+        skip_dirs = {'.git', 'venv', 'node_modules', '__pycache__', '.venv', 'dist', 'build'}
+
+        for py_file in workspace.rglob('*.py'):
+            # Skip certain directories
+            if any(part in skip_dirs for part in py_file.parts):
+                continue
+
+            rel_path = py_file.relative_to(workspace)
+            python_files.append(str(rel_path))
+
+            if len(python_files) >= 20:  # Limit to first 20 files
+                break
+
+        return f"\n### File List (first {len(python_files)} Python files)\n" + "\n".join(f"- {f}" for f in python_files)
 
     def _log(self, task_id: str, message: str) -> None:
         """Add log message to task."""
